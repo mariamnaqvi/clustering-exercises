@@ -2,8 +2,7 @@ import pandas as pd
 import numpy as np
 import os
 
-import matplotlib.pyplot as plt
-import seaborn as sns
+from sklearn.preprocessing import MinMaxScaler
 import scipy.stats as stats
 # use get_db_url function to connect to the codeup db
 from env import get_db_url
@@ -34,7 +33,10 @@ def split_data(df, seed=123):
 
 # One hot encoding 
 def one_hot_enocde(df):
-
+    '''
+    This function takes in a dataframe and one hot encodes the gender column. It also renames the one hot encoded column, concats dummy dataframe to the 
+    original dataframe and drops the original column. It then returns the dataframe.
+    '''
     dummy_df=pd.get_dummies(df['gender'], dummy_na=False, 
                                 drop_first=True)
 
