@@ -5,6 +5,8 @@ import os
 from env import get_db_url
 
 import matplotlib.pyplot as plt
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import MinMaxScaler
 
 def get_zillow_data(cached=False):
     '''
@@ -16,23 +18,19 @@ def get_zillow_data(cached=False):
     # If the cached parameter is false, or the csv file is not on disk, read from the database into a dataframe
     if cached == False or os.path.isfile('zillow_df.csv') == False:
         sql_query = '''
-        SELECT *
-        FROM properties_2017 prop
-        JOIN propertylandusetype landuse ON prop.propertylandusetypeid = landuse.propertylandusetypeid
-       JOIN architecturalstyletype USING (architecturalstyletypeid)
-        	LEFT JOIN heatingorsystemtype USING (heatingorsystemtypeid)
-        	LEFT JOIN storytype st ON prop.storytypeid = st.storytypeid
-        	LEFT JOIN typeconstructiontype ct ON prop.typeconstructiontypeid = ct.typeconstructiontypeid
-        	JOIN 
-        		(SELECT parcelid, max(logerror) AS logerror, max(transactiondate) AS transactiondate
-                FROM predictions_2017
-                GROUP BY parcelid) AS pred_2017
-                USING(parcelid)
-        	WHERE transactiondate LIKE '2017-%%-%%'
-        	AND parcelid IN(
-                            SELECT DISTINCT parcelid)
-            AND latitude IS NOT NULL
-            AND longitude IS NOT NULL; 
+        SELECT * 
+        FROM predictions_2017 pred
+        LEFT JOIN properties_2017 USING(parcelid)
+        LEFT JOIN airconditioningtype USING(airconditioningtypeid)
+        LEFT JOIN architecturalstyletype USING(architecturalstyletypeid)
+        LEFT JOIN buildingclasstype USING(buildingclasstypeid)
+        LEFT JOIN heatingorsystemtype USING(heatingorsystemtypeid)
+        LEFT JOIN propertylandusetype USING(propertylandusetypeid)
+        LEFT JOIN storytype USING(storytypeid)
+        LEFT JOIN typeconstructiontype USING(typeconstructiontypeid)
+        WHERE pred.transactiondate LIKE '2017%'
+        AND latitude IS NOT NULL
+        AND longitude IS NOT NULL;  
         '''
         zillow_df = pd.read_sql(sql_query, get_db_url('zillow'))
         #also cache the data we read from the db, to a file on disk
@@ -64,7 +62,7 @@ def summarize(df):
     print('Dataframe Description')
     print(df.describe())
     print('----------------------')
-    num_cols = [col for col in df.columns if df[col].dtype != 'O']
+    num_cols = [col for col in df.columns if df[col].dtype != 'object']
     cat_cols = [col for col in df.columns if col not in num_cols]
     print('----------------------')
     print('Dataframe value counts ')
@@ -142,3 +140,37 @@ def data_prep(df, cols_to_remove=[], prop_required_column=0.5, prop_required_row
     df = handle_missing_values(df, prop_required_column, prop_required_row)
     return df
 
+# Splitting Data
+def split_data(df, seed=123):
+    '''
+    This function takes in a pandas dataframe and a random seed. It splits the original
+    data into train, test and split dataframes and returns them.
+    Test dataset is 20% of the original dataset
+    Train is 56% (0.7 * 0.8 = .56) of the original dataset
+    Validate is 24% (0.3 * 0.7 = 0.24) of the original dataset
+    '''
+    train, test = train_test_split(df, train_size=0.8, random_state=seed)
+    train, validate = train_test_split(train, train_size=0.7, random_state=seed)
+    return train, validate, test
+
+# Scaling
+def scale_data(X_train, X_validate, X_test):
+    '''
+    This function takes in the features for train, validate and test splits. It creates a MinMax Scaler and fits that to the train set.
+    It then transforms the validate and test splits and returns the scaled features for the train, validate and test splits.
+    '''
+    # create scaler
+    scaler = MinMaxScaler()
+    # Note that we only call .fit with the training data,
+    # but we use .transform to apply the scaling to all the data splits.
+    scaler.fit(X_train)
+
+    # convert scaled variables to a dataframe 
+    X_train_scaled = pd.DataFrame(scaler.transform(X_train),index=X_train.index,
+                                    columns=X_train.columns)
+    X_validate_scaled = pd.DataFrame(scaler.transform(X_validate), index=X_validate.index,
+                                    columns=X_validate.columns)
+    X_test_scaled = pd.DataFrame(scaler.transform(X_test), index=X_test.index,
+                                    columns=X_test.columns)
+
+    return X_train_scaled, X_validate_scaled, X_test_scaled
