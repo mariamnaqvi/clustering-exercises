@@ -7,6 +7,8 @@ from env import get_db_url
 import matplotlib.pyplot as plt
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import MinMaxScaler
+from sklearn.impute import SimpleImputer
+
 
 def get_zillow_data(cached=False):
     '''
@@ -140,6 +142,27 @@ def data_prep(df, cols_to_remove=[], prop_required_column=0.5, prop_required_row
     df = handle_missing_values(df, prop_required_column, prop_required_row)
     return df
 
+def remove_outliers(df, k, col_list):
+    ''' remove outliers from a list of columns in a dataframe 
+        and return that dataframe
+    '''
+    
+    for col in col_list:
+        # get quartiles
+        q1, q3 = df[f'{col}'].quantile([.25, .75])  
+        # calculate interquartile range
+        iqr = q3 - q1   
+        # get upper bound
+        upper_bound = q3 + k * iqr 
+        # get lower bound
+        lower_bound = q1 - k * iqr   
+
+        # return dataframe without outliers
+        
+        df = df[(df[f'{col}'] > lower_bound) & (df[f'{col}'] < upper_bound)]
+        
+    return df
+
 # Splitting Data
 def split_data(df, seed=123):
     '''
@@ -174,3 +197,52 @@ def scale_data(X_train, X_validate, X_test):
                                     columns=X_test.columns)
 
     return X_train_scaled, X_validate_scaled, X_test_scaled
+
+
+def impute(df, my_strategy, column_list):
+    ''' 
+    This function takes in a df, strategy, and column list and
+    returns df with listed columns imputed using imputing stratagy
+    '''
+    # build imputer    
+    imputer = SimpleImputer(strategy=my_strategy)  
+    # fit/transform selected columns
+    df[column_list] = imputer.fit_transform(df[column_list]) 
+
+    return df
+
+def prepare_zillow(df):
+    '''
+    This function takes in a apndas dataframe, removes duplicate rows and columns, keeps the last transaction date, 
+    filters out any non single unit properties, removes outliers, handles missing values,
+    drops columns with nulls beyond threshold specified, splits the df and imputes missing values.
+    '''
+    # remove duplicate parcelids
+    df = df.sort_values('transactiondate').drop_duplicates('parcelid',keep='last')
+    # drop duplicate columns
+    df = df.loc[:,~df.columns.duplicated()]
+    # drop duplicate parcelid keeping the latest one by transaction date
+    df = df.sort_values('transactiondate').drop_duplicates('parcelid',keep='last')
+    # remove non single unit props
+    df = df[(df.propertylandusedesc == 'Single Family Residential') |
+          (df.propertylandusedesc == 'Mobile Home') |
+          (df.propertylandusedesc == 'Manufactured, Modular, Prefabricated Homes') |
+          (df.propertylandusedesc == 'Townhouse')]
+    # remove outliers in bed count, bath count, and area to better target single unit properties
+    df = remove_outliers(df, 1.5, ['calculatedfinishedsquarefeet', 'bedroomcnt', 'bathroomcnt'])
+    # dropping cols/rows where more than half of the values are null
+    df = handle_missing_values(df, prop_required_column = .5, prop_required_row = .5)
+    # # drop columns with too many nulls 
+    df = df.drop(columns=['heatingorsystemtypeid', 'buildingqualitytypeid',
+                  'propertyzoningdesc', 'unitcnt', 'heatingorsystemdesc'])
+    # call split df function to split into train, validate, test
+    train, validate, test = split_data(df)
+    # imputing continuous columns with median value
+    train = impute(train, 'median', ['yearbuilt','finishedsquarefeet12', 'lotsizesquarefeet', 'structuretaxvaluedollarcnt', 'taxvaluedollarcnt', 'landtaxvaluedollarcnt', 'taxamount'])
+    # imputing categorical colummns with most frequent
+    cat_cols = ['calculatedbathnbr','fullbathcnt', 'regionidcity', 'regionidzip',
+           'censustractandblock']
+    train = impute(train, 'most_frequent', 
+            cat_cols)
+    print('values have been imputed')
+    return df, train, validate, test
